@@ -208,8 +208,20 @@ def main():
         
     train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
     
-    optimizer = torch.optim.Adam([{'params': [p[1] for p in model.named_parameters() if p[1].requires_grad & ('conv5' not in p[0])]}, 
-                                   {'params': model.conv5.parameters(), 'lr': 1e-4}], 
+    optimizer = torch.optim.Adam([{'params': model.conv1.parameters()},
+                                  {'params': model.conv2.parameters()},
+                                  {'params': model.conv3.parameters()},
+                                  {'params': model.conv4.parameters()},
+                                  {'params': model.conv5.parameters(), 'lr': 1e-4}, 
+                                  {'params': model.dsn2.parameters(), 'lr': 1e-8},
+                                  {'params': model.dsn3.parameters(), 'lr': 1e-8},
+                                  {'params': model.dsn4.parameters(), 'lr': 1e-8},
+                                  {'params': model.dsn5.parameters(), 'lr': 1e-8}, 
+                                  {'params': model.fusion1.parameters(), 'lr': 5e-8}, 
+                                  {'params': model.fusion2.parameters(), 'lr': 5e-8},
+                                  {'params': model.fusion3.parameters(), 'lr': 5e-8},
+                                  {'params': model.fusion4.parameters(), 'lr': 5e-8},
+                                  {'params': model.fusion5.parameters(), 'lr': 5e-8}], 
                                  lr=args.lr, weight_decay=args.decay) 
     
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.1)
@@ -283,7 +295,7 @@ def train(model, train_loader, optimizer, scheduler):
                 optimizer.zero_grad()
                 loss_value = 0
                 
-        scheduler.step()
+        #scheduler.step()
 
 def test(model, test_dataset):
     if args.mode == 'cpu':
