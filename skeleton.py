@@ -23,7 +23,7 @@ parser.add_argument('-lr', default=1e-6, type=float, help='learning rate')
 parser.add_argument('-decay', default=0.0002, type=float, help='weight decay')
 parser.add_argument('-mode', default='cpu', type=str, help='mode')
 parser.add_argument('-gpuid', default=0, type=int, help='gpu id')
-parser.add_argument('-train', default=True, action='store_true')
+parser.add_argument('-train', default=False, action='store_true')
 parser.add_argument('-test', default=False, action='store_true')
 
 
@@ -208,10 +208,11 @@ def main():
         
     train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
     
-    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), 
+    optimizer = torch.optim.Adam([{'params': [p[1] for p in model.named_parameters() if p[1].requires_grad & ('conv5' not in p[0])]}, 
+                                   {'params': model.conv5.parameters(), 'lr': 1e-4}], 
                                  lr=args.lr, weight_decay=args.decay) 
     
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=300, gamma=0.1)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.1)
     
     if args.train:        
         train(model, train_loader, optimizer, scheduler)        
