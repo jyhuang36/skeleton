@@ -1,6 +1,6 @@
 import os
 import numpy as np
-import scipy
+import scipy.misc
 import argparse
 from PIL import Image
 import matplotlib.pyplot as plt
@@ -19,12 +19,13 @@ parser = argparse.ArgumentParser(description='Deep Skeleton')
 parser.add_argument('-epochs', default=6, type=int, help='number of epochs')
 parser.add_argument('-itersize', default=10, type=int, help='iteration size')
 parser.add_argument('-printfreq', default=100, type=int, help='printing frequency')
-parser.add_argument('-lr', default=1e-6, type=float, help='learning rate')
+parser.add_argument('-lr', default=1e-4, type=float, help='learning rate')
 parser.add_argument('-decay', default=0.0002, type=float, help='weight decay')
 parser.add_argument('-mode', default='cpu', type=str, help='mode')
 parser.add_argument('-gpuid', default=0, type=int, help='gpu id')
 parser.add_argument('-train', default=False, action='store_true')
-parser.add_argument('-test', default=False, action='store_true')
+parser.add_argument('-visualize', default=False, action='store_true')
+parser.add_argument('-test', default=True, action='store_true')
 
 
 
@@ -142,7 +143,7 @@ class Skeleton(nn.Module):
         nn.init.constant_(self.fusion4.weight, 0.5)
         nn.init.constant_(self.fusion5.weight, 1)
         
-class SkeletonDataset(Dataset):
+class SkeletonTrainingSet(Dataset):
     def __init__(self, lst_file, root_dir='', resize=None, transform=None, threshold=None):
         with open(lst_file) as f:
             self.lst = f.read().splitlines()
@@ -170,8 +171,6 @@ class SkeletonDataset(Dataset):
         label = np.array(label)   
         if label.ndim == 3:
             label = label[:,:,0]
-        
-        label = label *2
             
         if self.threshold:
             label_bin_lst = []
@@ -185,6 +184,30 @@ class SkeletonDataset(Dataset):
             label5 = label4 + label_bin_lst[3]
 
         return image, label2, label3, label4, label5
+
+
+class SkeletonTestSet(Dataset):
+    def __init__(self, im_dir, root_dir='', resize=None, transform=None):
+        self.lst = os.listdir(root_dir + im_dir)
+        self.root_dir = root_dir
+        self.im_dir = im_dir
+        self.resize = resize
+        self.transform = transform
+        
+    def __len__(self):
+        return len(self.lst)
+    
+    def __getitem__(self, index):
+        image = Image.open(self.root_dir + self.im_dir + self.lst[index])
+            
+        if self.resize:
+            image = self.resize(image)
+            
+        if self.transform:
+            image = self.transform(image)
+            
+        return image, self.lst[index]
+        
 
 def main():
     global args
@@ -200,11 +223,16 @@ def main():
         torch.cuda.manual_seed(0)               
         model.cuda()
     
-    train_dataset = SkeletonDataset(lst_file="aug_data/train_pair.lst", 
-                    transform=transforms.Compose([transforms.ToTensor(),
+    train_dataset = SkeletonTrainingSet(lst_file="aug_data/train_pair.lst", 
+                                        transform=transforms.Compose([transforms.ToTensor(),
                                                   transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                                  std=[0.229, 0.224, 0.225])]),
-                    threshold=[0, 14, 40, 92, 196])
+                                                                       std=[0.229, 0.224, 0.225])]),
+                                        threshold=[0, 14, 40, 92, 196])
+    
+    test_dataset = SkeletonTestSet(im_dir='images/test/', 
+                                   transform=transforms.Compose([transforms.ToTensor(),
+                                                                 transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                                                                      std=[0.229, 0.224, 0.225])]))
         
     train_loader = DataLoader(train_dataset, batch_size=1, shuffle=True)
     
@@ -212,31 +240,32 @@ def main():
                                   {'params': model.conv2.parameters()},
                                   {'params': model.conv3.parameters()},
                                   {'params': model.conv4.parameters()},
-                                  {'params': model.conv5.parameters(), 'lr': 1e-4}, 
-                                  {'params': model.dsn2.parameters(), 'lr': 1e-8},
-                                  {'params': model.dsn3.parameters(), 'lr': 1e-8},
-                                  {'params': model.dsn4.parameters(), 'lr': 1e-8},
-                                  {'params': model.dsn5.parameters(), 'lr': 1e-8}, 
-                                  {'params': model.fusion1.parameters(), 'lr': 5e-8}, 
-                                  {'params': model.fusion2.parameters(), 'lr': 5e-8},
-                                  {'params': model.fusion3.parameters(), 'lr': 5e-8},
-                                  {'params': model.fusion4.parameters(), 'lr': 5e-8},
-                                  {'params': model.fusion5.parameters(), 'lr': 5e-8}], 
+                                  {'params': model.conv5.parameters()}, 
+                                  {'params': model.dsn2.parameters()},
+                                  {'params': model.dsn3.parameters()},
+                                  {'params': model.dsn4.parameters()},
+                                  {'params': model.dsn5.parameters()}, 
+                                  {'params': model.fusion1.parameters()}, 
+                                  {'params': model.fusion2.parameters()},
+                                  {'params': model.fusion3.parameters()},
+                                  {'params': model.fusion4.parameters()},
+                                  {'params': model.fusion5.parameters()}], 
                                  lr=args.lr, weight_decay=args.decay) 
     
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=2, gamma=0.1)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.1)
     
     if args.train:        
         train(model, train_loader, optimizer, scheduler)        
         torch.save(model.state_dict(), 'skeleton.pt')
     
-    if args.test:    
-        test(model, train_dataset)
+    if args.visualize:    
+        visualize(model, test_dataset)
     
-
+    if args.test:
+        test(model, test_dataset)
 
     
-def loss_fn(y, label):
+def loss_class(y, label):
     label_ = label.cpu().data.numpy()
     count_lst = []       
     for i in range(y.shape[1]):
@@ -279,8 +308,8 @@ def train(model, train_loader, optimizer, scheduler):
             
             y2, y3, y4, y5, yf = model(image)
             
-            loss = (loss_fn(yf, label5) + loss_fn(y2, label2) + loss_fn(y3, label3) + \
-                    loss_fn(y4, label4) + loss_fn(y5, label5))/args.itersize
+            loss = (loss_class(yf, label5) + loss_class(y2, label2) + loss_class(y3, label3) + \
+                    loss_class(y4, label4) + loss_class(y5, label5))/args.itersize
             
             loss_value += loss.cpu().data.numpy()
                     
@@ -297,24 +326,27 @@ def train(model, train_loader, optimizer, scheduler):
                 
         #scheduler.step()
 
-def test(model, test_dataset):
+def visualize(model, visualize_dataset):
     if args.mode == 'cpu':
         model.load_state_dict(torch.load('skeleton.pt', 
-                                     map_location={'cuda':'cpu', 'cuda:1':'cpu',                                                    
+                                     map_location={'cuda:0':'cpu', 'cuda:1':'cpu',                                                    
                                                    'cuda:2':'cpu', 'cuda:3':'cpu'}))
     else:
         model.load_state_dict(torch.load('skeleton.pt'))
         
-    image = test_dataset[0][0]
+    if args.mode == 'gpu':
+        dtype_float = torch.cuda.FloatTensor
+    else:
+        dtype_float = torch.FloatTensor
+        
+    image = visualize_dataset[198][0]
     image = image.unsqueeze(0) 
-    image_var = Variable(image, requires_grad=False)   
+    image_var = Variable(image, requires_grad=False).type(dtype_float) 
     y2, y3, y4, y5, yf = model(image_var)
-
     
-    yf_ = 1 - F.softmax(yf[0], 0)[0].data.numpy()
+    yf_ = 1 - F.softmax(yf[0], 0)[0].cpu().data.numpy()
     scale_lst = [yf_]
     plot_single_scale(scale_lst, 22)
-
 
 def plot_single_scale(scale_lst, size):
     pylab.rcParams['figure.figsize'] = size, size/2
@@ -329,6 +361,35 @@ def plot_single_scale(scale_lst, size):
         s.xaxis.set_ticks_position('none')
     plt.tight_layout()
 
+
+def test(model, test_dataset):
+    if args.mode == 'cpu':
+        model.load_state_dict(torch.load('skeleton.pt', 
+                                     map_location={'cuda:0':'cpu', 'cuda:1':'cpu',                                                    
+                                                   'cuda:2':'cpu', 'cuda:3':'cpu'}))
+    else:
+        model.load_state_dict(torch.load('skeleton.pt'))
+        
+    if args.mode == 'gpu':
+        dtype_float = torch.cuda.FloatTensor
+    else:
+        dtype_float = torch.FloatTensor
+        
+    for i in range(len(test_dataset)):
+        image, name = test_dataset[i]
+        image = image.unsqueeze(0) 
+        if image.shape[1] == 1:
+            image = torch.cat((image, image, image), 1)
+        
+        image_var = Variable(image, requires_grad=False).type(dtype_float)   
+        y2, y3, y4, y5, yf = model(image_var)
+    
+        yf_ = 1 - F.softmax(yf[0], 0)[0].cpu().data.numpy()
+        yf_ = yf_/yf_.max()
+        
+        scipy.misc.imsave('results/' + name[0:-4] + '.png', yf_)
+        print('%d of %d images saved' %(i+1, len(test_dataset)))
+            
        
 if __name__ == '__main__':
     main()                
