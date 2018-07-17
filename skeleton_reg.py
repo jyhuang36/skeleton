@@ -1,6 +1,6 @@
 import os
 import numpy as np
-import scipy
+import scipy.misc
 import argparse
 from PIL import Image
 import matplotlib.pyplot as plt
@@ -384,7 +384,7 @@ def visualize(model, visualize_dataset):
                                      map_location={'cuda:0':'cpu', 'cuda:1':'cpu',                                                    
                                                    'cuda:2':'cpu', 'cuda:3':'cpu'}))
     else:
-        model.load_state_dict(torch.load('skeleton.pt'))
+        model.load_state_dict(torch.load('skeleton_reg.pt'))
         
     if args.mode == 'gpu':
         dtype_float = torch.cuda.FloatTensor
@@ -394,7 +394,7 @@ def visualize(model, visualize_dataset):
     image = visualize_dataset[198][0]
     image = image.unsqueeze(0) 
     image_var = Variable(image, requires_grad=False).type(dtype_float) 
-    y2, y3, y4, y5, yf = model(image_var)
+    y2, y3, y4, y5, yf, y2s, y3s, y4s, y5s = model(image_var)
     
     yf_ = 1 - F.softmax(yf[0], 0)[0].cpu().data.numpy()
     scale_lst = [yf_]
@@ -420,7 +420,7 @@ def test(model, test_dataset):
                                      map_location={'cuda:0':'cpu', 'cuda:1':'cpu',                                                    
                                                    'cuda:2':'cpu', 'cuda:3':'cpu'}))
     else:
-        model.load_state_dict(torch.load('skeleton.pt'))
+        model.load_state_dict(torch.load('skeleton_reg.pt'))
         
     if args.mode == 'gpu':
         dtype_float = torch.cuda.FloatTensor
@@ -434,7 +434,7 @@ def test(model, test_dataset):
             image = torch.cat((image, image, image), 1)
         
         image_var = Variable(image, requires_grad=False).type(dtype_float)   
-        y2, y3, y4, y5, yf = model(image_var)
+        y2, y3, y4, y5, yf, y2s, y3s, y4s, y5s = model(image_var)
     
         yf_ = 1 - F.softmax(yf[0], 0)[0].cpu().data.numpy()
         yf_ = yf_/yf_.max()
